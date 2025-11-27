@@ -1149,7 +1149,14 @@ class MainWindow(QMainWindow):
         current_cat = getattr(self, 'current_category', '全部')
         mime_text = event.mimeData().text()
         
-        # 处理子分类拖拽
+        # 在"全部"界面时，禁止子分类拖拽排序
+        if current_cat == "全部":
+            if mime_text.startswith("subcategory:"):
+                self.dragging_subcategory = None
+                event.acceptProposedAction()
+                return
+        
+        # 处理子分类拖拽（仅非"全部"界面）
         if mime_text.startswith("subcategory:") and self.dragging_subcategory:
             dragged_subcat = mime_text.replace("subcategory:", "")
             
@@ -1184,46 +1191,128 @@ class MainWindow(QMainWindow):
         
         tool_data = self.dragging_card.tool_data
         
-        # 检查是否拖到子分类标题上
-        for header in self.subcategory_headers:
-            header_rect = header.geometry()
-            if header_rect.contains(drop_pos):
-                # 移动到该子分类
-                tool_data["subcategory"] = header.title
+        # 辅助函数：判断是否为分类标题（以【开头）
+        def is_category_header(header):
+            return header.title.startswith("【")
+        
+        # 辅助函数：从分类标题获取分类名称（去除【】）
+        def get_category_from_header(header):
+            return header.title.strip("【】")
+        
+        # 辅助函数：获取真实的子分类名称（去除前导空格）
+        def get_real_subcategory(header):
+            return header.title.strip()
+        
+        # 在"全部"界面时，需要同时处理分类和子分类
+        if current_cat == "全部":
+            target_category = tool_data.get("category", "")
+            target_subcategory = tool_data.get("subcategory", "")
+            
+            # 检查是否拖到标题上
+            for header in self.subcategory_headers:
+                header_rect = header.geometry()
+                if header_rect.contains(drop_pos):
+                    if is_category_header(header):
+                        # 拖到分类标题上，更新分类，清除子分类
+                        target_category = get_category_from_header(header)
+                        target_subcategory = ""
+                    else:
+                        # 拖到子分类标题上，需要找到对应的分类
+                        subcat_name = get_real_subcategory(header)
+                        # 查找该子分类属于哪个分类
+                        for cat, subcats in self.subcategories.items():
+                            if subcat_name in subcats:
+                                target_category = cat
+                                target_subcategory = subcat_name
+                                break
+                    
+                    if tool_data.get("category") != target_category or tool_data.get("subcategory", "") != target_subcategory:
+                        tool_data["category"] = target_category
+                        tool_data["subcategory"] = target_subcategory
+                        self.save_config()
+                        self.filter_tools_by_category(current_cat)
+                    self.dragging_card = None
+                    event.acceptProposedAction()
+                    return
+            
+            # 检查是否拖到标题下方的区域
+            for i, header in enumerate(self.subcategory_headers):
+                header_rect = header.geometry()
+                next_header_top = float('inf')
+                if i + 1 < len(self.subcategory_headers):
+                    next_header_top = self.subcategory_headers[i + 1].geometry().top()
+                
+                if drop_pos.y() > header_rect.bottom() and drop_pos.y() < next_header_top:
+                    if is_category_header(header):
+                        target_category = get_category_from_header(header)
+                        target_subcategory = ""
+                    else:
+                        subcat_name = get_real_subcategory(header)
+                        for cat, subcats in self.subcategories.items():
+                            if subcat_name in subcats:
+                                target_category = cat
+                                target_subcategory = subcat_name
+                                break
+                    break
+            
+            if tool_data.get("category") != target_category or tool_data.get("subcategory", "") != target_subcategory:
+                tool_data["category"] = target_category
+                tool_data["subcategory"] = target_subcategory
                 self.save_config()
                 self.filter_tools_by_category(current_cat)
                 self.dragging_card = None
                 event.acceptProposedAction()
                 return
-        
-        # 检查是否拖到子分类标题下方的区域（移动到该子分类）
-        target_subcategory = ""
-        for i, header in enumerate(self.subcategory_headers):
-            header_rect = header.geometry()
-            # 找到下一个子分类标题或底部
-            next_header_top = float('inf')
-            if i + 1 < len(self.subcategory_headers):
-                next_header_top = self.subcategory_headers[i + 1].geometry().top()
+        else:
+            # 非"全部"界面的原有逻辑
+            # 检查是否拖到子分类标题上
+            for header in self.subcategory_headers:
+                header_rect = header.geometry()
+                if header_rect.contains(drop_pos):
+                    # 如果是分类标题（【xxx】），则移除子分类
+                    if is_category_header(header):
+                        tool_data["subcategory"] = ""
+                    else:
+                        # 移动到该子分类
+                        tool_data["subcategory"] = get_real_subcategory(header)
+                    self.save_config()
+                    self.filter_tools_by_category(current_cat)
+                    self.dragging_card = None
+                    event.acceptProposedAction()
+                    return
             
-            # 如果在当前子分类标题下方，且在下一个子分类标题上方
-            if drop_pos.y() > header_rect.bottom() and drop_pos.y() < next_header_top:
-                target_subcategory = header.title
-                break
-        
-        # 检查是否拖到子分类标题上方的无子分类区域
-        if self.subcategory_headers:
-            first_header_top = self.subcategory_headers[0].geometry().top()
-            if drop_pos.y() < first_header_top:
-                target_subcategory = ""
-        
-        # 如果目标子分类与当前不同，更新子分类
-        if tool_data.get("subcategory", "") != target_subcategory:
-            tool_data["subcategory"] = target_subcategory
-            self.save_config()
-            self.filter_tools_by_category(current_cat)
-            self.dragging_card = None
-            event.acceptProposedAction()
-            return
+            # 检查是否拖到子分类标题下方的区域（移动到该子分类）
+            target_subcategory = tool_data.get("subcategory", "")  # 默认保持不变
+            for i, header in enumerate(self.subcategory_headers):
+                header_rect = header.geometry()
+                # 找到下一个子分类标题或底部
+                next_header_top = float('inf')
+                if i + 1 < len(self.subcategory_headers):
+                    next_header_top = self.subcategory_headers[i + 1].geometry().top()
+                
+                # 如果在当前子分类标题下方，且在下一个子分类标题上方
+                if drop_pos.y() > header_rect.bottom() and drop_pos.y() < next_header_top:
+                    if is_category_header(header):
+                        # 分类标题下方是无子分类区域
+                        target_subcategory = ""
+                    else:
+                        target_subcategory = get_real_subcategory(header)
+                    break
+            
+            # 检查是否拖到第一个标题上方的区域
+            if self.subcategory_headers:
+                first_header_top = self.subcategory_headers[0].geometry().top()
+                if drop_pos.y() < first_header_top:
+                    target_subcategory = ""
+            
+            # 如果目标子分类与当前不同，更新子分类
+            if tool_data.get("subcategory", "") != target_subcategory:
+                tool_data["subcategory"] = target_subcategory
+                self.save_config()
+                self.filter_tools_by_category(current_cat)
+                self.dragging_card = None
+                event.acceptProposedAction()
+                return
         
         # 同一子分类内的排序
         # 找到放下位置的卡片
