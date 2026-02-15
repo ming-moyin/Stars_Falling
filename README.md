@@ -87,7 +87,7 @@ dirsearch -u {url}
 ### 方式二：从源码运行
 
 ```bash
-git clone https://github.com/yourusername/stars_falling.git
+git clone https://github.com/ming-moyin/stars_falling.git
 cd stars_falling
 pip install -r requirements.txt
 python main.py
